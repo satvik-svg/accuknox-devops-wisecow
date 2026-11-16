@@ -20,12 +20,17 @@ pod() {
     | jq -r "[.items[] | select($filter)][0].metadata.name // empty"
 }
 
-# name|command. Each one is run with kubectl exec inside the pod.
+# name|command. Each command is run through bash inside the pod, the same way
+# an attacker who found a command injection in the app would run it (bash is
+# the app's own shell, so it is allowed). Note that the very first program
+# kubectl exec starts is not checked by AppArmor exec rules, the profile is
+# attached at that moment, so everything below is started from bash.
 TRIES=(
   "list files with ls (not on the allowlist)|ls /"
-  "start a different shell, sh (not on the allowlist)|sh -c id"
+  "start another shell, sh (not on the allowlist)|sh -c id"
   "run apt-get (not on the allowlist)|apt-get --version"
-  "read /etc/shadow|cat /etc/shadow"
+  "read /etc/shadow (blocked file)|cat /etc/shadow"
+  "read /etc/hostname (allowed file)|cat /etc/hostname"
   "run fortune (on the allowlist, should work)|/usr/games/fortune -s"
 )
 
@@ -38,8 +43,7 @@ run_tries() {
   echo "|---|---|---|---|" >> "$OUT/exec-results.md"
   for t in "${TRIES[@]}"; do
     local name=${t%%|*} cmd=${t#*|} out rc
-    # shellcheck disable=SC2086
-    out=$(kubectl -n "$NS" exec "$p" -- $cmd 2>&1)
+    out=$(kubectl -n "$NS" exec "$p" -- bash -c "$cmd" 2>&1)
     rc=$?
     out=$(printf '%s' "$out" | head -c 300 | tr '\n|' '  ')
     echo "$phase: $name -> exit $rc: $out"

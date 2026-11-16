@@ -34,3 +34,10 @@ spec:
       - path: /usr/games/cowsay
       - path: /usr/bin/perl
   action: Allow
+  # Reading files is fine (the sensitive ones are blocked by the other policy).
+  # Without this, a "block" file posture would also stop bash and fortune from
+  # reading their own libraries and data, and the pod would crash.
+  file:
+    matchDirectories:
+      - dir: /
+        recursive: true

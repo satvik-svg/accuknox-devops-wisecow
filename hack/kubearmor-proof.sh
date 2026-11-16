@@ -70,6 +70,11 @@ AFTER_LS_RC=unset
 run_tries "Before policies"
 check_app "before policies"
 
+# stream KubeArmor alerts for the wisecow namespace from here on
+karmor logs -n "$NS" --json --logFilter=policy > "$OUT/karmor-logs.json" 2> "$OUT/karmor-logs.err" &
+LOGS=$!
+sleep 8
+
 echo "Applying policies"
 kubectl annotate ns "$NS" kubearmor-file-posture=block --overwrite
 kubectl apply -f kubearmor/
@@ -85,9 +90,6 @@ kubectl get ksp -n "$NS" | tee "$OUT/policies.txt"
 karmor probe > "$OUT/probe-after.txt" 2>&1 || true
 kubectl -n "$NS" get pods -o yaml | grep -i -E 'apparmor|kubearmor' | sort -u | tee "$OUT/pod-annotations.txt"
 
-karmor logs -n "$NS" --json --logFilter=policy > "$OUT/karmor-logs.json" 2> "$OUT/karmor-logs.err" &
-LOGS=$!
-sleep 8
 
 run_tries "After policies" armored
 check_app "after policies"
@@ -95,6 +97,20 @@ check_app "after policies"
 sleep 10
 kill $LOGS 2>/dev/null || true
 wait $LOGS 2>/dev/null || true
+
+
+# Extra detail that helps when something goes wrong
+{
+  kubectl -n "$NS" get pods -o wide
+  for p in $(kubectl -n "$NS" get pod -l app=wisecow -o name); do
+    echo "== $p logs (previous run if it restarted)"
+    kubectl -n "$NS" logs "$p" --previous --tail=30 2>/dev/null || kubectl -n "$NS" logs "$p" --tail=30
+  done
+  echo "== AppArmor profiles KubeArmor wrote"
+  for f in /etc/apparmor.d/kubearmor-wisecow-*; do echo "--- $f"; sudo cat "$f"; done
+  echo "== AppArmor denials in the kernel log"
+  sudo dmesg | grep 'apparmor="DENIED"' | grep kubearmor-wisecow | tail -40
+} > "$OUT/debug.txt" 2>&1 || true
 
 # One line per alert, easier to read than the raw JSON
 jq -r 'select(.PolicyName != null) | [.Action, .PolicyName, .ProcessName, .Resource, .Result] | @tsv' \

@@ -9,10 +9,15 @@ OUT=${OUT:-proof}
 mkdir -p "$OUT"
 NS=wisecow
 
-# first running pod that is not on its way out
+# First running pod that is not on its way out. With "armored" it also has
+# to carry the AppArmor profile KubeArmor generated for it.
 pod() {
+  local filter='.metadata.deletionTimestamp == null and .status.phase == "Running"'
+  if [ "${1:-}" = armored ]; then
+    filter="$filter"' and ((.metadata.annotations // {}) | to_entries | map(select(.value | tostring | test("kubearmor-"))) | length > 0)'
+  fi
   kubectl -n "$NS" get pod -l app=wisecow -o json \
-    | jq -r '[.items[] | select(.metadata.deletionTimestamp == null and .status.phase == "Running")][0].metadata.name'
+    | jq -r "[.items[] | select($filter)][0].metadata.name // empty"
 }
 
 # name|command. Each one is run with kubectl exec inside the pod.
@@ -26,7 +31,7 @@ TRIES=(
 
 run_tries() {
   local phase=$1 p
-  p=$(pod)
+  p=$(pod "${2:-}")
   echo "## $phase (pod $p)" | tee -a "$OUT/exec-results.md"
   echo "" >> "$OUT/exec-results.md"
   echo "| Attempt | Command | Exit code | Output |" >> "$OUT/exec-results.md"
@@ -38,6 +43,7 @@ run_tries() {
     rc=$?
     out=$(printf '%s' "$out" | head -c 300 | tr '\n|' '  ')
     echo "$phase: $name -> exit $rc: $out"
+    if [ "${2:-}" = armored ] && [ "$cmd" = "ls /" ]; then AFTER_LS_RC=$rc; fi
     echo "| $name | \`$cmd\` | $rc | ${out:0:160} |" >> "$OUT/exec-results.md"
   done
   echo "" >> "$OUT/exec-results.md"
@@ -59,6 +65,7 @@ check_app() {
 
 : > "$OUT/exec-results.md"
 APP_BROKEN=0
+AFTER_LS_RC=unset
 
 run_tries "Before policies"
 check_app "before policies"
@@ -68,7 +75,12 @@ kubectl annotate ns "$NS" kubearmor-file-posture=block --overwrite
 kubectl apply -f kubearmor/
 kubectl -n "$NS" rollout restart deploy/wisecow
 kubectl -n "$NS" rollout status deploy/wisecow --timeout=180s
-sleep 10
+# wait until a pod with the KubeArmor AppArmor profile is up, and the old ones are gone
+for i in $(seq 1 30); do
+  [ -n "$(pod armored)" ] && [ "$(kubectl -n "$NS" get pod -l app=wisecow --no-headers | wc -l)" -le 2 ] && break
+  sleep 5
+done
+kubectl -n "$NS" get pods -o wide
 kubectl get ksp -n "$NS" | tee "$OUT/policies.txt"
 karmor probe > "$OUT/probe-after.txt" 2>&1 || true
 kubectl -n "$NS" get pods -o yaml | grep -i -E 'apparmor|kubearmor' | sort -u | tee "$OUT/pod-annotations.txt"
@@ -77,7 +89,7 @@ karmor logs -n "$NS" --json --logFilter=policy > "$OUT/karmor-logs.json" 2> "$OU
 LOGS=$!
 sleep 8
 
-run_tries "After policies"
+run_tries "After policies" armored
 check_app "after policies"
 
 sleep 10
@@ -112,6 +124,10 @@ cat "$OUT/summary.md"
 
 if [ "$BLOCKS" -lt 1 ]; then
   echo "No Block alerts were recorded, so enforcement did not work"
+  exit 1
+fi
+if [ "$AFTER_LS_RC" = 0 ] || [ "$AFTER_LS_RC" = unset ]; then
+  echo "ls still ran after the policies, so the process allowlist is not enforced"
   exit 1
 fi
 if [ "$APP_BROKEN" = 1 ]; then

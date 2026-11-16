@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# What CI deploys: base app plus the Let's Encrypt issuer.
+resources:
+  - ../../base
+  - cluster-issuer.yaml
+
+# CI runs "kustomize edit set image" here to point at the pushed image and tag.
+images:
+  - name: wisecow
+    newName: wisecow
+    newTag: latest

@@ -1,0 +1,8 @@
+# For a local kind or minikube cluster with no public domain.
+# cert-manager signs the certificate itself, so the browser will warn, but traffic is still TLS.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned
+spec:
+  selfSigned: {}

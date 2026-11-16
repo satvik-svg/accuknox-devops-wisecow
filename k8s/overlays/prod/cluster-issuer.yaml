@@ -1,0 +1,17 @@
+# Let's Encrypt issuer used by cert-manager to get a real certificate for the Ingress.
+# Switch the server to the staging URL while testing to avoid rate limits:
+#   https://acme-staging-v02.api.letsencrypt.org/directory
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: satvik764@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx

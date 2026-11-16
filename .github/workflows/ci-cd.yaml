@@ -176,7 +176,9 @@ jobs:
           echo "Certificate served by the ingress:"
           echo | openssl s_client -connect 127.0.0.1:8443 -servername "$host" 2>/dev/null \
             | openssl x509 -noout -ext subjectAltName -dates
-          # the app health script from this repo should agree that the site is up
+          # the app health script from this repo should agree that the site is up.
+          # It has no --resolve option, so point the host name at the port forward.
+          echo "127.0.0.1 ${host}" | sudo tee -a /etc/hosts
           pip install -q -r scripts/requirements.txt
           python3 scripts/app_health.py --insecure "https://${host}:8443/" || {
             # the server answers one connection at a time, so give it one more try

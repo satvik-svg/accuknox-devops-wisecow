@@ -1,0 +1,83 @@
+name: KubeArmor policy proof
+
+# Runs wisecow on a single node k3s cluster on the GitHub runner (a real
+# Ubuntu VM with AppArmor), installs KubeArmor, applies our policies and
+# then tries things the policies should stop. The results and the
+# KubeArmor alerts are saved as an artifact and shown in the job summary.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "kubearmor/**"
+      - "k8s/base/**"
+      - "Dockerfile"
+      - "wisecow.sh"
+      - "hack/kubearmor-proof.sh"
+      - ".github/workflows/kubearmor-proof.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kubearmor:
+    name: Enforce policies on k3s
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show what the kernel supports
+        run: |
+          uname -a
+          echo "Active LSMs: $(cat /sys/kernel/security/lsm)"
+          sudo aa-status --enabled && echo "AppArmor is enabled"
+
+      - name: Install k3s
+        run: |
+          curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
+          for i in $(seq 1 30); do kubectl get nodes 2>/dev/null | grep -q ' Ready' && break; sleep 5; done
+          kubectl get nodes -o wide
+
+      - name: Build wisecow and load it into k3s
+        run: |
+          docker build -t docker.io/library/wisecow:latest .
+          docker save docker.io/library/wisecow:latest | sudo k3s ctr images import -
+
+      - name: Deploy wisecow
+        run: |
+          kubectl apply -f k8s/base/namespace.yaml -f k8s/base/deployment.yaml -f k8s/base/service.yaml
+          kubectl -n wisecow rollout status deploy/wisecow --timeout=180s
+
+      - name: Install KubeArmor
+        run: |
+          curl -sfL http://get.kubearmor.io/ | sudo sh -s -- -b /usr/local/bin
+          karmor version || true
+          karmor install
+          for i in $(seq 1 60); do
+            kubectl -n kubearmor get pods -l kubearmor-app=kubearmor 2>/dev/null | grep -q '1/1.*Running' && break
+            sleep 5
+          done
+          kubectl -n kubearmor get pods -o wide
+          kubectl -n kubearmor wait --for=condition=Ready pod --all --timeout=300s
+          karmor probe | tee /tmp/probe.txt
+
+      - name: Try the attacks before and after the policies
+        run: bash hack/kubearmor-proof.sh
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubearmor-proof
+          path: proof/
+
+      - name: Dump state on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n kubearmor logs -l kubearmor-app=kubearmor --tail=200 || true
+          kubectl get ksp -A -o yaml || true

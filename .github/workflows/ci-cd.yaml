@@ -1,0 +1,123 @@
+name: Build and deploy wisecow
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # Docker Hub repo the image is pushed to, for example satviksrivastava/wisecow
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME || 'local' }}/wisecow
+
+jobs:
+  test:
+    name: Lint manifests and test scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Kubernetes manifests
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          for overlay in k8s/overlays/prod k8s/overlays/local; do
+            kubectl kustomize "$overlay" | ./kubeconform -strict -summary \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Python tests
+        run: |
+          pip install -r scripts/requirements-dev.txt
+          pytest -q scripts/tests
+
+  build:
+    name: Build and push image
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        name: Work out the image tag
+        run: echo "image=${IMAGE_NAME}:sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Pull requests only build the image to prove the Dockerfile works.
+      # Pushes to main also publish it with a commit tag and "latest".
+      - name: Build (and push on main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        run: |
+          docker build -t wisecow:ci .
+          docker run -d --name wisecow -p 4499:4499 wisecow:ci
+          sleep 3
+          curl -sf --retry 5 --retry-delay 1 --retry-all-errors http://localhost:4499/ | grep -q '<pre>'
+          docker rm -f wisecow
+
+  deploy:
+    name: Deploy to Kubernetes
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that a cluster is configured
+        id: guard
+        run: |
+          if [ -z "$KUBECONFIG_DATA" ]; then
+            echo "KUBECONFIG secret is not set, skipping the deploy step."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: azure/setup-kubectl@v4
+        if: steps.guard.outputs.ready == 'true'
+
+      - name: Write kubeconfig
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          mkdir -p ~/.kube
+          # the secret holds the kubeconfig file encoded with base64
+          echo "$KUBECONFIG_DATA" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+          kubectl cluster-info
+
+      - name: Point the manifests at the new image and apply
+        if: steps.guard.outputs.ready == 'true'
+        working-directory: k8s/overlays/prod
+        run: |
+          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar xz -C /tmp
+          /tmp/kustomize edit set image "wisecow=${{ needs.build.outputs.image }}"
+          kubectl apply -k .
+          kubectl -n wisecow rollout status deployment/wisecow --timeout=180s
+          kubectl -n wisecow get pods,svc,ingress

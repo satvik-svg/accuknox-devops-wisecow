@@ -11,6 +11,19 @@ permissions:
   contents: read
   packages: write
 
+# Names and tool versions in one place. The image owner comes from the
+# repository, so a fork pushes to its own GHCR namespace.
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: wisecow
+  APP_PORT: "4499"
+  KIND_CLUSTER: wisecow
+  KUSTOMIZE_VERSION: v5.4.3
+  KUBECONFORM_VERSION: v0.6.7
+  ACTIONLINT_VERSION: 1.7.12
+  INGRESS_NGINX_VERSION: controller-v1.14.5
+  CERT_MANAGER_VERSION: v1.21.3
+
 jobs:
   test:
     name: Lint and test
@@ -25,7 +38,7 @@ jobs:
       - name: Lint workflows, shell, YAML and Python
         run: |
           pip install ruff yamllint
-          bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          bash <(curl -sSL "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash") "$ACTIONLINT_VERSION"
           ./actionlint
           shellcheck hack/*.sh
           yamllint .
@@ -34,7 +47,7 @@ jobs:
 
       - name: Validate Kubernetes manifests
         run: |
-          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz
           for overlay in k8s/overlays/prod k8s/overlays/local; do
             kubectl kustomize "$overlay" | ./kubeconform -strict -summary \
               -schema-location default \
@@ -60,7 +73,7 @@ jobs:
       - id: meta
         name: Work out the image name and tag
         run: |
-          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wisecow"
+          repo="${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}"
           echo "repo=${repo}" >> "$GITHUB_OUTPUT"
           echo "image=${repo}:sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
@@ -70,7 +83,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -92,8 +105,8 @@ jobs:
         run: |
           image="${{ steps.meta.outputs.image }}"
           if [ "${{ github.event_name }}" != "pull_request" ]; then docker pull "$image"; fi
-          docker run -d --name wisecow -p 4499:4499 "$image"
-          curl -sf --retry 10 --retry-delay 1 --retry-all-errors http://localhost:4499/ | tee /tmp/cow.html
+          docker run -d --name wisecow -p "${APP_PORT}:${APP_PORT}" "$image"
+          curl -sf --retry 10 --retry-delay 1 --retry-all-errors "http://localhost:${APP_PORT}/" | tee /tmp/cow.html
           grep -q '<pre>' /tmp/cow.html
           docker rm -f wisecow
 
@@ -112,30 +125,31 @@ jobs:
             # nothing was pushed for a pull request, so build it again here
             docker build -t "$IMAGE" .
           else
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
             docker pull "$IMAGE"
           fi
 
       - name: Create kind cluster
         uses: helm/kind-action@v1
         with:
-          cluster_name: wisecow
+          cluster_name: ${{ env.KIND_CLUSTER }}
           config: hack/kind-config.yaml
 
       - name: Load the image into kind
-        run: kind load docker-image "$IMAGE" --name wisecow
+        run: kind load docker-image "$IMAGE" --name "$KIND_CLUSTER"
 
       - name: Install ingress-nginx and cert-manager
         run: |
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.14.5/deploy/static/provider/kind/deploy.yaml
-          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
+          kubectl apply -f "https://raw.githubusercontent.com/kubernetes/ingress-nginx/${INGRESS_NGINX_VERSION}/deploy/static/provider/kind/deploy.yaml"
+          kubectl apply -f "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
           kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=240s
           kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=240s
           kubectl -n cert-manager rollout status deploy/cert-manager --timeout=240s
 
       - name: Install kustomize
         run: |
-          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar xz -C /tmp
+          base="https://github.com/kubernetes-sigs/kustomize/releases/download"
+          curl -sSL "${base}/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar xz -C /tmp
           sudo mv /tmp/kustomize /usr/local/bin/kustomize
 
       - name: Deploy wisecow with the new image
@@ -150,19 +164,29 @@ jobs:
 
       - name: Check that HTTPS returns a cow
         run: |
+          # same host name the local overlay put on the Ingress
+          host=$(sed -n 's/^host=//p' k8s/overlays/local/params.env)
+          echo "Testing host $host"
           kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8443:443 >/tmp/pf.log 2>&1 &
           sleep 5
           # -k because the local overlay uses a self signed certificate
           curl -sk --retry 10 --retry-delay 3 --retry-all-errors \
-            --resolve wisecow.local:8443:127.0.0.1 https://wisecow.local:8443/ | tee /tmp/cow.html
+            --resolve "${host}:8443:127.0.0.1" "https://${host}:8443/" | tee /tmp/cow.html
           grep -q '<pre>' /tmp/cow.html
           echo "Certificate served by the ingress:"
-          echo | openssl s_client -connect 127.0.0.1:8443 -servername wisecow.local 2>/dev/null \
+          echo | openssl s_client -connect 127.0.0.1:8443 -servername "$host" 2>/dev/null \
             | openssl x509 -noout -ext subjectAltName -dates
+          # the app health script from this repo should agree that the site is up
+          pip install -q -r scripts/requirements.txt
+          python3 scripts/app_health.py --insecure "https://${host}:8443/" || {
+            # the server answers one connection at a time, so give it one more try
+            sleep 2
+            python3 scripts/app_health.py --insecure "https://${host}:8443/"
+          }
           # plain HTTP should be redirected to HTTPS
           kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8080:80 >/tmp/pf80.log 2>&1 &
           sleep 3
-          code=$(curl -s -o /dev/null -w '%{http_code}' --resolve wisecow.local:8080:127.0.0.1 http://wisecow.local:8080/)
+          code=$(curl -s -o /dev/null -w '%{http_code}' --resolve "${host}:8080:127.0.0.1" "http://${host}:8080/")
           echo "HTTP status for plain http: $code"
           test "$code" = "308"
           {
@@ -188,6 +212,9 @@ jobs:
     environment: production
     env:
       KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+      # repository (or environment) variables for the real domain
+      WISECOW_HOST: ${{ vars.WISECOW_HOST }}
+      ACME_EMAIL: ${{ vars.ACME_EMAIL }}
     steps:
       - uses: actions/checkout@v7
 
@@ -197,9 +224,13 @@ jobs:
           if [ -z "$KUBECONFIG_DATA" ]; then
             echo "KUBECONFIG secret is not set, skipping the deploy step."
             echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if [ -z "$WISECOW_HOST" ] || [ -z "$ACME_EMAIL" ]; then
+            echo "::error::KUBECONFIG is set, so also set the WISECOW_HOST and ACME_EMAIL variables"
+            exit 1
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - uses: azure/setup-kubectl@v5
         if: steps.guard.outputs.ready == 'true'
@@ -216,13 +247,15 @@ jobs:
       - name: Install kustomize
         if: steps.guard.outputs.ready == 'true'
         run: |
-          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar xz -C /tmp
+          base="https://github.com/kubernetes-sigs/kustomize/releases/download"
+          curl -sSL "${base}/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar xz -C /tmp
           sudo mv /tmp/kustomize /usr/local/bin/kustomize
 
       - name: Point the manifests at the new image and apply
         if: steps.guard.outputs.ready == 'true'
         working-directory: k8s/overlays/prod
         run: |
+          printf 'host=%s\nacmeEmail=%s\n' "$WISECOW_HOST" "$ACME_EMAIL" > params.env
           kustomize edit set image "wisecow=${{ needs.build.outputs.image }}"
           kubectl apply -k .
           kubectl -n wisecow rollout status deployment/wisecow --timeout=180s

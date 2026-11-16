@@ -56,3 +56,31 @@ def test_main_returns_zero_when_healthy(tmp_path, monkeypatch):
         lambda path: {"cpu": 1.0, "memory": 1.0, "disk": 1.0, "processes": 1},
     )
     assert system_health.main(["--log-file", str(tmp_path / "h.log")]) == 0
+
+
+def test_env_vars_set_the_defaults():
+    environ = {
+        "HEALTH_CPU_LIMIT": "70",
+        "HEALTH_PROCESS_LIMIT": "42",
+        "HEALTH_DISK_PATH": "/data",
+        "HEALTH_INTERVAL": "15",
+        "HEALTH_LOG_FILE": "",
+    }
+    args = system_health.parse_args([], environ)
+    assert args.cpu == 70.0 and args.memory == 80.0
+    assert args.processes == 42
+    assert args.disk_path == "/data"
+    assert args.interval == 15
+    assert args.log_file == ""
+
+
+def test_flags_win_over_env_vars():
+    args = system_health.parse_args(["--cpu", "90"], {"HEALTH_CPU_LIMIT": "70"})
+    assert args.cpu == 90.0
+
+
+def test_bad_env_value_gives_a_clear_error():
+    import pytest
+
+    with pytest.raises(SystemExit, match="HEALTH_DISK_LIMIT"):
+        system_health.parse_args([], {"HEALTH_DISK_LIMIT": "lots"})

@@ -1,7 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Local overlay: same app, self signed certificate, host wisecow.local
+# Local overlay: same app with a self signed certificate.
+# The host name comes from params.env (wisecow.local by default).
 resources:
   - ../../base
   - selfsigned-issuer.yaml
@@ -14,12 +15,30 @@ patches:
       - op: replace
         path: /metadata/annotations/cert-manager.io~1cluster-issuer
         value: selfsigned
-      - op: replace
-        path: /spec/tls/0/hosts/0
-        value: wisecow.local
-      - op: replace
-        path: /spec/rules/0/host
-        value: wisecow.local
+
+# Only used to feed the replacements below. The local-config annotation keeps
+# this ConfigMap out of the rendered manifests.
+configMapGenerator:
+  - name: wisecow-params
+    envs:
+      - params.env
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        config.kubernetes.io/local-config: "true"
+
+replacements:
+  - source:
+      kind: ConfigMap
+      name: wisecow-params
+      fieldPath: data.host
+    targets:
+      - select:
+          kind: Ingress
+          name: wisecow
+        fieldPaths:
+          - spec.tls.0.hosts.0
+          - spec.rules.0.host
 
 images:
   - name: wisecow

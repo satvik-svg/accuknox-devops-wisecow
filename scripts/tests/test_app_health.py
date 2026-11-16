@@ -54,3 +54,35 @@ def test_main_exit_codes(server, capsys):
     assert app_health.main([server + "/ok", server + "/broken"]) == 1
     out = capsys.readouterr().out
     assert "UP" in out and "DOWN" in out
+
+
+def test_urls_and_options_from_env_vars():
+    environ = {
+        "APP_HEALTH_URLS": "http://a.test/, http://b.test/",
+        "APP_HEALTH_TIMEOUT": "2.5",
+        "APP_HEALTH_OK_CODES": "200,204",
+        "APP_HEALTH_INSECURE": "true",
+        "APP_HEALTH_INTERVAL": "30",
+    }
+    args = app_health.parse_args([], environ)
+    assert args.urls == ["http://a.test/", "http://b.test/"]
+    assert args.timeout == 2.5
+    assert app_health.parse_codes(args.ok_codes) == {200, 204}
+    assert args.insecure is True
+    assert args.interval == 30
+
+
+def test_urls_on_the_command_line_win_over_env():
+    args = app_health.parse_args(["http://c.test/"], {"APP_HEALTH_URLS": "http://a.test/"})
+    assert args.urls == ["http://c.test/"]
+
+
+def test_no_urls_at_all_is_an_error():
+    with pytest.raises(SystemExit):
+        app_health.parse_args([], {})
+
+
+def test_results_go_to_the_log_file(server, tmp_path):
+    log_file = tmp_path / "app.log"
+    assert app_health.main(["--log-file", str(log_file), server + "/ok"]) == 0
+    assert "UP" in log_file.read_text()

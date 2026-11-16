@@ -11,8 +11,12 @@
 # .github/workflows/kubearmor-proof.yaml.
 set -uo pipefail
 
-OUT=${OUT:-proof}
-NS=wisecow
+# Settings, all overridable from the environment
+OUT=${OUT:-proof}            # where the report and logs go
+NS=${NS:-wisecow}            # namespace the app runs in
+APP=${APP:-wisecow}          # value of the app label and Deployment name
+SVC_PORT=${SVC_PORT:-80}     # Service port of the app
+LOCAL_PORT=${LOCAL_PORT:-4499}  # local port used for the app check
 RESULTS="$OUT/exec-results.md"
 mkdir -p "$OUT"
 
@@ -40,7 +44,7 @@ pod() {
   if [ "${1:-}" = armored ]; then
     filter+=' and ([(.metadata.annotations // {})[] | tostring | select(test("kubearmor-"))] | length > 0)'
   fi
-  kubectl -n "$NS" get pod -l app=wisecow -o json |
+  kubectl -n "$NS" get pod -l "app=$APP" -o json |
     jq -r "[.items[] | select($filter)][0].metadata.name // empty"
 }
 
@@ -68,13 +72,13 @@ run_tries() {
 
 check_app() {
   local pf msg
-  kubectl -n "$NS" port-forward svc/wisecow 4499:80 >/dev/null 2>&1 &
+  kubectl -n "$NS" port-forward "svc/$APP" "$LOCAL_PORT:$SVC_PORT" >/dev/null 2>&1 &
   pf=$!
   sleep 3
-  if curl -sf --retry 5 --retry-delay 1 --retry-all-errors http://127.0.0.1:4499/ | grep -q '<pre>'; then
-    msg="App check $1: wisecow still serves cows"
+  if curl -sf --retry 5 --retry-delay 1 --retry-all-errors "http://127.0.0.1:$LOCAL_PORT/" | grep -q '<pre>'; then
+    msg="App check $1: $APP still serves cows"
   else
-    msg="App check $1: wisecow did NOT answer"
+    msg="App check $1: $APP did NOT answer"
     APP_BROKEN=1
   fi
   echo "$msg"
@@ -96,11 +100,11 @@ echo "Applying policies"
 # decides what happens to programs that are not on the allowlist.
 kubectl annotate ns "$NS" kubearmor-file-posture=block --overwrite
 kubectl apply -f kubearmor/
-kubectl -n "$NS" rollout restart deploy/wisecow
-kubectl -n "$NS" rollout status deploy/wisecow --timeout=180s
+kubectl -n "$NS" rollout restart "deploy/$APP"
+kubectl -n "$NS" rollout status "deploy/$APP" --timeout=180s
 # Wait for an armored pod and for the old pods to be gone
 for _ in $(seq 1 30); do
-  if [ -n "$(pod armored)" ] && [ "$(kubectl -n "$NS" get pod -l app=wisecow --no-headers | wc -l)" -le 2 ]; then
+  if [ -n "$(pod armored)" ] && [ "$(kubectl -n "$NS" get pod -l "app=$APP" --no-headers | wc -l)" -le 2 ]; then
     break
   fi
   sleep 5
@@ -119,17 +123,17 @@ wait "$LOGS" 2>/dev/null || true
 # Details that help when something goes wrong
 {
   kubectl -n "$NS" get pods -o wide
-  for p in $(kubectl -n "$NS" get pod -l app=wisecow -o name); do
+  for p in $(kubectl -n "$NS" get pod -l "app=$APP" -o name); do
     echo "== $p logs (previous run if it restarted)"
     kubectl -n "$NS" logs "$p" --previous --tail=30 2>/dev/null || kubectl -n "$NS" logs "$p" --tail=30
   done
   echo "== AppArmor profiles written by KubeArmor"
-  for f in /etc/apparmor.d/kubearmor-wisecow-*; do
+  for f in /etc/apparmor.d/kubearmor-"$NS"-*; do
     echo "--- $f"
     sudo cat "$f"
   done
   echo "== AppArmor denials in the kernel log"
-  sudo dmesg | grep 'apparmor="DENIED"' | grep kubearmor-wisecow | tail -40
+  sudo dmesg | grep 'apparmor="DENIED"' | grep "kubearmor-$NS" | tail -40
 } >"$OUT/debug.txt" 2>&1 || true
 
 # One line per alert, easier to read than the raw JSON

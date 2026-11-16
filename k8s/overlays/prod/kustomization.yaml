@@ -2,9 +2,44 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 # What CI deploys: base app plus the Let's Encrypt issuer.
+# The host name and the Let's Encrypt contact email come from params.env.
 resources:
   - ../../base
   - cluster-issuer.yaml
+
+# Only used to feed the replacements below. The local-config annotation keeps
+# this ConfigMap out of the rendered manifests.
+configMapGenerator:
+  - name: wisecow-params
+    envs:
+      - params.env
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        config.kubernetes.io/local-config: "true"
+
+replacements:
+  - source:
+      kind: ConfigMap
+      name: wisecow-params
+      fieldPath: data.host
+    targets:
+      - select:
+          kind: Ingress
+          name: wisecow
+        fieldPaths:
+          - spec.tls.0.hosts.0
+          - spec.rules.0.host
+  - source:
+      kind: ConfigMap
+      name: wisecow-params
+      fieldPath: data.acmeEmail
+    targets:
+      - select:
+          kind: ClusterIssuer
+          name: letsencrypt-prod
+        fieldPaths:
+          - spec.acme.email
 
 # CI runs "kustomize edit set image" here to point at the pushed image and tag.
 images:

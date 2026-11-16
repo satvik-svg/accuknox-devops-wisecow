@@ -8,7 +8,8 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: satvik764@gmail.com
+    # set from acmeEmail in params.env (CI uses the ACME_EMAIL repository variable)
+    email: admin@example.com
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
     solvers:

@@ -7,13 +7,13 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
+  # Placeholder host. Each overlay sets the real one from its params.env.
   ingressClassName: nginx
   tls:
     - hosts:
         - wisecow.example.com
       secretName: wisecow-tls
   rules:
-    # Replace wisecow.example.com with a domain that points at your ingress controller
     - host: wisecow.example.com
       http:
         paths:

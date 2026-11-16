@@ -27,6 +27,9 @@ jobs:
     timeout-minutes: 30
     env:
       KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      # built on the runner and imported into k3s, never pushed anywhere.
+      # k8s/base/deployment.yaml asks for wisecow:latest, which is this name.
+      LOCAL_IMAGE: docker.io/library/wisecow:latest
     steps:
       - uses: actions/checkout@v7
 
@@ -44,8 +47,8 @@ jobs:
 
       - name: Build wisecow and load it into k3s
         run: |
-          docker build -t docker.io/library/wisecow:latest .
-          docker save docker.io/library/wisecow:latest | sudo k3s ctr images import -
+          docker build -t "$LOCAL_IMAGE" .
+          docker save "$LOCAL_IMAGE" | sudo k3s ctr images import -
 
       - name: Deploy wisecow
         run: |

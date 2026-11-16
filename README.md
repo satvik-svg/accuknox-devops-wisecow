@@ -17,7 +17,7 @@ Original app: https://github.com/nyrahul/wisecow
 | 1.3 | GitHub Action that builds a new image on every change | [`.github/workflows/ci-cd.yaml`](.github/workflows/ci-cd.yaml) | `build` job pushes to GHCR on every push to `main` |
 | 1.4 | Continuous deployment to Kubernetes | `deploy` and `e2e` jobs in the same workflow | `e2e` deploys the new image on every run; `deploy` targets a real cluster when `KUBECONFIG` is set |
 | 1.5 | Challenge: TLS for the app | [`k8s/base/ingress.yaml`](k8s/base/ingress.yaml), [`k8s/overlays/`](k8s/overlays) | `e2e` job gets a cow over HTTPS and checks HTTP redirects to HTTPS |
-| 2 | Two of the four scripts | [`scripts/system_health.py`](scripts/system_health.py), [`scripts/app_health.py`](scripts/app_health.py) | 11 pytest tests in CI |
+| 2 | Two of the four scripts | [`scripts/system_health.py`](scripts/system_health.py), [`scripts/app_health.py`](scripts/app_health.py) | 18 pytest tests in CI |
 | 3 | Bonus: KubeArmor zero trust policy and proof of violations | [`kubearmor/`](kubearmor) | [`kubearmor-proof.yaml`](.github/workflows/kubearmor-proof.yaml) workflow and [`kubearmor/proof/`](kubearmor/proof) |
 | - | Private repo, read access for `nyrahul` | GitHub settings | Private; collaborator invite is added at submission time |
 
@@ -27,7 +27,7 @@ Original app: https://github.com/nyrahul/wisecow
 git push to main
    |
    v
-GitHub Actions: lint and test -> build image -> push ghcr.io/satvik-svg/wisecow:sha-<commit>
+GitHub Actions: lint and test -> build image -> push ghcr.io/<repo owner>/wisecow:sha-<commit>
                                      |
                                      +-> e2e: kind cluster, ingress-nginx, cert-manager, HTTPS check
                                      +-> deploy: kubectl apply -k k8s/overlays/prod (if KUBECONFIG is set)
@@ -44,8 +44,8 @@ client --HTTPS--> ingress-nginx (TLS cert from cert-manager) --> Service wisecow
 Dockerfile                      image on debian:bookworm-slim, runs as uid 10001
 wisecow.sh                      the original app, unchanged
 k8s/base/                       Namespace, Deployment, Service, Ingress with TLS
-k8s/overlays/prod/              Let's Encrypt ClusterIssuer, used by the deploy job
-k8s/overlays/local/             self signed issuer and host wisecow.local, for kind and CI
+k8s/overlays/prod/              Let's Encrypt ClusterIssuer, host and email in params.env, used by deploy
+k8s/overlays/local/             self signed issuer, host wisecow.local in params.env, for kind and CI
 .github/workflows/ci-cd.yaml    lint, test, build, push, end to end test, deploy
 .github/workflows/kubearmor-proof.yaml   KubeArmor enforcement test on a real VM
 hack/kind-config.yaml           kind cluster config
@@ -103,17 +103,20 @@ push and pull request to `main`. It needs no secrets for the normal path.
 1. **test**: actionlint, shellcheck, yamllint, ruff, kubeconform on both
    kustomize overlays, and the pytest suite.
 2. **build**: builds the image and pushes it to GitHub Container Registry as
-   `ghcr.io/satvik-svg/wisecow:sha-<commit>` and `:latest`, using the built
+   `ghcr.io/<repo owner>/wisecow:sha-<commit>` and `:latest`, using the built
    in `GITHUB_TOKEN` (`packages: write`). Pull requests only build. A smoke
    test runs the image and expects a cow back.
 3. **e2e**: creates a kind cluster on the runner, installs ingress-nginx and
    cert-manager, loads the image from step 2, deploys `k8s/overlays/local`,
    waits for the certificate, then checks that HTTPS returns a cow and that
-   plain HTTP gets a 308 redirect. The cow shows up in the job summary.
+   plain HTTP gets a 308 redirect. It also runs `scripts/app_health.py`
+   against the ingress. The cow shows up in the job summary.
 4. **deploy**: on pushes to `main`, sets the new image with
    `kustomize edit set image` and runs `kubectl apply -k k8s/overlays/prod`
    against a real cluster. It skips cleanly when the `KUBECONFIG` secret
-   (a base64 kubeconfig) is not set.
+   (a base64 kubeconfig) is not set. When it is set, the repository
+   variables `WISECOW_HOST` and `ACME_EMAIL` must be set too, and the job
+   writes them into `k8s/overlays/prod/params.env` before applying.
 
 For the deploy job on a real cluster: the API server must be reachable from
 GitHub runners, and since the repo is private the GHCR package is private
@@ -126,13 +129,30 @@ The Ingress asks cert-manager for a certificate stored in the `wisecow-tls`
 secret, and nginx redirects HTTP to HTTPS.
 
 - **Local and CI** (`k8s/overlays/local`): a self signed `ClusterIssuer`, host
-  `wisecow.local`. Traffic is encrypted, but clients need `-k` or will show a
+  `wisecow.local` (set in `params.env`). Traffic is encrypted, but clients need `-k` or will show a
   browser warning, because no public authority signed the certificate.
 - **Real domain** (`k8s/overlays/prod`): a Let's Encrypt `ClusterIssuer` with
-  an HTTP-01 challenge. Point a DNS name at the ingress controller, replace
-  `wisecow.example.com` in `k8s/base/ingress.yaml`, and apply the overlay.
+  an HTTP-01 challenge. Point a DNS name at the ingress controller, put the
+  host and your email in `k8s/overlays/prod/params.env` (or the
+  `WISECOW_HOST` and `ACME_EMAIL` variables for CI), and apply the overlay.
   cert-manager then gets and renews a trusted certificate. This needs a domain
   and a public cluster, so it is not exercised in CI.
+
+## Configuration
+
+Nothing environment specific is baked into the manifests or the pipeline:
+
+| Setting | Where to change it | Default |
+| --- | --- | --- |
+| Image name and registry | `REGISTRY`, `IMAGE_NAME` in the workflow `env`; owner comes from the repo | `ghcr.io/<repo owner>/wisecow` |
+| Tool versions (kustomize, kubeconform, ingress-nginx, cert-manager) | workflow `env` block | pinned versions |
+| Public host name and Let's Encrypt email | `k8s/overlays/prod/params.env`, or the `WISECOW_HOST` and `ACME_EMAIL` repo variables in CI | `wisecow.example.com`, placeholder email |
+| Local host name | `k8s/overlays/local/params.env` | `wisecow.local` |
+| Cluster access for deploy | `KUBECONFIG` secret (base64) | not set, deploy skips |
+| Script limits, URLs, interval, log file | CLI flags or `HEALTH_*` and `APP_HEALTH_*` env vars | see below |
+
+No tokens or passwords live in the repo. The pipeline only uses the built in
+`GITHUB_TOKEN` and the optional `KUBECONFIG` secret.
 
 ## Monitoring scripts
 
@@ -153,7 +173,12 @@ console and a log file. Exit code 1 means there was an alert.
 python system_health.py                                    # one check, limits 80% and 500 processes
 python system_health.py --cpu 70 --memory 75 --disk 90 --processes 400
 python system_health.py --interval 30 --log-file /var/log/system_health.log
+HEALTH_CPU_LIMIT=70 HEALTH_INTERVAL=60 python system_health.py
 ```
+
+Environment variables: `HEALTH_CPU_LIMIT`, `HEALTH_MEMORY_LIMIT`,
+`HEALTH_DISK_LIMIT`, `HEALTH_PROCESS_LIMIT`, `HEALTH_DISK_PATH`,
+`HEALTH_INTERVAL`, `HEALTH_LOG_FILE`. A flag wins over its variable.
 
 **`app_health.py`** calls one or more URLs and reports `UP` or `DOWN` from the
 HTTP status code (below 400 is up, or set `--ok-codes`). Timeouts and refused
@@ -163,7 +188,12 @@ connections count as `DOWN`.
 python app_health.py https://wisecow.example.com/
 python app_health.py --insecure https://wisecow.local:8443/ http://localhost:4499/
 python app_health.py --ok-codes 200,204 --interval 60 https://example.com/health
+APP_HEALTH_URLS="https://a.example.com,https://b.example.com" APP_HEALTH_LOG_FILE=app.log python app_health.py
 ```
+
+Environment variables: `APP_HEALTH_URLS`, `APP_HEALTH_TIMEOUT`,
+`APP_HEALTH_OK_CODES`, `APP_HEALTH_INSECURE`, `APP_HEALTH_INTERVAL`,
+`APP_HEALTH_LOG_FILE`.
 
 ## KubeArmor zero trust policy
 

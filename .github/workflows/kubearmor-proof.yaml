@@ -28,7 +28,7 @@ jobs:
     env:
       KUBECONFIG: /etc/rancher/k3s/k3s.yaml
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Show what the kernel supports
         run: |
@@ -62,7 +62,9 @@ jobs:
             sleep 5
           done
           kubectl -n kubearmor get pods -o wide
-          kubectl -n kubearmor wait --for=condition=Ready pod --all --timeout=300s
+          # the snitch pod is a one off job that ends as Completed, so only wait for the long running parts
+          kubectl -n kubearmor rollout status ds -l kubearmor-app=kubearmor --timeout=300s
+          kubectl -n kubearmor rollout status deploy/kubearmor-relay --timeout=300s
           karmor probe | tee /tmp/probe.txt
 
       - name: Try the attacks before and after the policies
@@ -70,7 +72,7 @@ jobs:
 
       - name: Upload the evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kubearmor-proof
           path: proof/

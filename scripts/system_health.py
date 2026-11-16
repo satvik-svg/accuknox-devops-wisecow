@@ -60,7 +60,10 @@ def run_check(thresholds, disk_path):
     metrics = collect_metrics(disk_path)
     log.info(
         "CPU %.1f%% | Memory %.1f%% | Disk %.1f%% | Processes %d",
-        metrics["cpu"], metrics["memory"], metrics["disk"], metrics["processes"],
+        metrics["cpu"],
+        metrics["memory"],
+        metrics["disk"],
+        metrics["processes"],
     )
     alerts = find_alerts(metrics, thresholds)
     for alert in alerts:
@@ -72,15 +75,32 @@ def run_check(thresholds, disk_path):
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Monitor CPU, memory, disk and process count.")
-    p.add_argument("--cpu", type=float, default=80.0, help="CPU usage limit in percent (default 80)")
-    p.add_argument("--memory", type=float, default=80.0, help="memory usage limit in percent (default 80)")
-    p.add_argument("--disk", type=float, default=80.0, help="disk usage limit in percent (default 80)")
-    p.add_argument("--processes", type=int, default=500, help="max number of running processes (default 500)")
-    p.add_argument("--disk-path", default="/", help="mount point to check for disk usage (default /)")
-    p.add_argument("--interval", type=int, default=0,
-                   help="seconds between checks; 0 means run once and exit (default 0)")
-    p.add_argument("--log-file", default="system_health.log",
-                   help="file to write logs to; pass an empty string to skip (default system_health.log)")
+    p.add_argument(
+        "--cpu", type=float, default=80.0, help="CPU usage limit in percent (default 80)"
+    )
+    p.add_argument(
+        "--memory", type=float, default=80.0, help="memory usage limit in percent (default 80)"
+    )
+    p.add_argument(
+        "--disk", type=float, default=80.0, help="disk usage limit in percent (default 80)"
+    )
+    p.add_argument(
+        "--processes", type=int, default=500, help="max number of running processes (default 500)"
+    )
+    p.add_argument(
+        "--disk-path", default="/", help="mount point to check for disk usage (default /)"
+    )
+    p.add_argument(
+        "--interval",
+        type=int,
+        default=0,
+        help="seconds between checks; 0 means run once and exit (default 0)",
+    )
+    p.add_argument(
+        "--log-file",
+        default="system_health.log",
+        help="file to write logs to; pass an empty string to skip (default system_health.log)",
+    )
     return p.parse_args(argv)
 
 

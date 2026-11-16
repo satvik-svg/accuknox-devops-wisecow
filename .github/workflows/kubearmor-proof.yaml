@@ -39,7 +39,7 @@ jobs:
       - name: Install k3s
         run: |
           curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
-          for i in $(seq 1 30); do kubectl get nodes 2>/dev/null | grep -q ' Ready' && break; sleep 5; done
+          for _ in $(seq 1 30); do kubectl get nodes 2>/dev/null | grep -q ' Ready' && break; sleep 5; done
           kubectl get nodes -o wide
 
       - name: Build wisecow and load it into k3s
@@ -57,7 +57,7 @@ jobs:
           curl -sfL http://get.kubearmor.io/ | sudo sh -s -- -b /usr/local/bin
           karmor version || true
           karmor install
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             kubectl -n kubearmor get pods -l kubearmor-app=kubearmor 2>/dev/null | grep -q '1/1.*Running' && break
             sleep 5
           done

@@ -20,16 +20,26 @@ def check_url(url, timeout=5.0, ok_codes=None, verify_tls=True):
     try:
         resp = requests.get(url, timeout=timeout, verify=verify_tls, allow_redirects=True)
     except requests.RequestException as exc:
-        return {"url": url, "status": "DOWN", "code": None,
-                "reason": type(exc).__name__, "ms": None}
+        return {
+            "url": url,
+            "status": "DOWN",
+            "code": None,
+            "reason": type(exc).__name__,
+            "ms": None,
+        }
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
     if ok_codes:
         healthy = resp.status_code in ok_codes
     else:
         healthy = resp.status_code < 400
-    return {"url": url, "status": "UP" if healthy else "DOWN", "code": resp.status_code,
-            "reason": resp.reason or "", "ms": elapsed_ms}
+    return {
+        "url": url,
+        "status": "UP" if healthy else "DOWN",
+        "code": resp.status_code,
+        "reason": resp.reason or "",
+        "ms": elapsed_ms,
+    }
 
 
 def format_result(r):
@@ -41,16 +51,30 @@ def format_result(r):
 
 
 def parse_args(argv=None):
-    p = argparse.ArgumentParser(description="Check if web applications are up using their HTTP status code.")
+    p = argparse.ArgumentParser(
+        description="Check if web applications are up using their HTTP status code."
+    )
     p.add_argument("urls", nargs="+", help="one or more URLs to check")
-    p.add_argument("--timeout", type=float, default=5.0, help="seconds to wait for a reply (default 5)")
-    p.add_argument("--ok-codes", default="",
-                   help="comma separated status codes that count as UP, for example 200,204 "
-                        "(default: anything below 400)")
-    p.add_argument("--insecure", action="store_true",
-                   help="skip TLS certificate checks, useful for self signed certs")
-    p.add_argument("--interval", type=int, default=0,
-                   help="seconds between rounds; 0 means check once and exit (default 0)")
+    p.add_argument(
+        "--timeout", type=float, default=5.0, help="seconds to wait for a reply (default 5)"
+    )
+    p.add_argument(
+        "--ok-codes",
+        default="",
+        help="comma separated status codes that count as UP, for example 200,204 "
+        "(default: anything below 400)",
+    )
+    p.add_argument(
+        "--insecure",
+        action="store_true",
+        help="skip TLS certificate checks, useful for self signed certs",
+    )
+    p.add_argument(
+        "--interval",
+        type=int,
+        default=0,
+        help="seconds between rounds; 0 means check once and exit (default 0)",
+    )
     return p.parse_args(argv)
 
 

@@ -37,8 +37,11 @@ def test_collect_metrics_returns_real_numbers():
 
 def test_main_writes_alert_to_log_file(tmp_path, monkeypatch):
     log_file = tmp_path / "health.log"
-    monkeypatch.setattr(system_health, "collect_metrics",
-                        lambda path: {"cpu": 99.0, "memory": 10.0, "disk": 10.0, "processes": 5})
+    monkeypatch.setattr(
+        system_health,
+        "collect_metrics",
+        lambda path: {"cpu": 99.0, "memory": 10.0, "disk": 10.0, "processes": 5},
+    )
     code = system_health.main(["--log-file", str(log_file)])
     logging.shutdown()
     assert code == 1
@@ -47,6 +50,9 @@ def test_main_writes_alert_to_log_file(tmp_path, monkeypatch):
 
 
 def test_main_returns_zero_when_healthy(tmp_path, monkeypatch):
-    monkeypatch.setattr(system_health, "collect_metrics",
-                        lambda path: {"cpu": 1.0, "memory": 1.0, "disk": 1.0, "processes": 1})
+    monkeypatch.setattr(
+        system_health,
+        "collect_metrics",
+        lambda path: {"cpu": 1.0, "memory": 1.0, "disk": 1.0, "processes": 1},
+    )
     assert system_health.main(["--log-file", str(tmp_path / "h.log")]) == 0

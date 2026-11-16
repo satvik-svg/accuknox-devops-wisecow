@@ -1,0 +1,11 @@
+# Lint and format settings for the Python scripts in scripts/
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# the tests add scripts/ to sys.path before importing the modules under test
+"scripts/tests/*" = ["E402"]

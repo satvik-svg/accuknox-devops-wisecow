@@ -5,3 +5,5 @@ __pycache__/
 *.log
 response
 *.zip
+.ruff_cache/
+/proof/

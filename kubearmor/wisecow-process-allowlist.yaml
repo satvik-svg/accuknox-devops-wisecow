@@ -1,0 +1,34 @@
+# Zero trust for processes: wisecow may only start the programs it really needs.
+# Anything else (a shell spawned by an attacker, apt, curl, python...) is denied
+# once the namespace process posture is set to "block" (see README.md here).
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorPolicy
+metadata:
+  name: wisecow-process-allowlist
+  namespace: wisecow
+spec:
+  severity: 7
+  message: "wisecow tried to run a program that is not on its allowlist"
+  selector:
+    matchLabels:
+      app: wisecow
+  process:
+    matchPaths:
+      # the script itself and the shell that runs it
+      - path: /usr/local/bin/wisecow.sh
+      - path: /usr/bin/env
+      - path: /usr/bin/bash
+      - path: /bin/bash
+      # commands used inside wisecow.sh
+      - path: /usr/bin/rm
+      - path: /usr/bin/mkfifo
+      - path: /usr/bin/cat
+      - path: /usr/bin/sleep
+      - path: /usr/bin/nc.openbsd
+      - path: /usr/bin/nc
+      - path: /bin/nc
+      - path: /usr/games/fortune
+      # cowsay is a perl script, so perl has to be allowed too
+      - path: /usr/games/cowsay
+      - path: /usr/bin/perl
+  action: Allow

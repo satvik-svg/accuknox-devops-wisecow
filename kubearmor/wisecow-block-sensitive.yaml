@@ -1,0 +1,31 @@
+# Extra guard rails that apply even to the allowed programs.
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorPolicy
+metadata:
+  name: wisecow-block-sensitive
+  namespace: wisecow
+spec:
+  severity: 8
+  message: "wisecow touched a sensitive file or tried to change the system"
+  selector:
+    matchLabels:
+      app: wisecow
+  file:
+    matchPaths:
+      - path: /etc/shadow
+      - path: /etc/gshadow
+    matchDirectories:
+      # nothing in the pod should change system config or binaries
+      - dir: /etc/
+        recursive: true
+        readOnly: true
+      - dir: /usr/
+        recursive: true
+        readOnly: true
+      # the app does not talk to the Kubernetes API, so its token is off limits
+      - dir: /var/run/secrets/kubernetes.io/serviceaccount/
+        recursive: true
+  network:
+    matchProtocols:
+      - protocol: raw
+  action: Block

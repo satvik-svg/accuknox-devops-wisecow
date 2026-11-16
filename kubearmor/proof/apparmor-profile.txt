@@ -1,0 +1,65 @@
+== AppArmor profiles written by KubeArmor
+--- /etc/apparmor.d/kubearmor-wisecow-wisecow-wisecow
+## == Managed by KubeArmor == ##
+#include <tunables/global>
+## == Dispatcher profile START == ##
+profile kubearmor-wisecow-wisecow-wisecow flags=(attach_disconnected,mediate_deleted) {
+	## == PRE START == ##
+	#include <abstractions/base>
+	network,
+	capability,
+	signal (receive) peer=runc,
+	signal (receive) peer=crun,
+	## == PRE END == ##
+	## == File/Dir START == ##
+        /{,**} klmrw,
+        deny /etc/{,**} klw,
+        deny /etc/gshadow klmrw,
+        deny /etc/shadow klmrw,
+        deny /usr/{,**} klw,
+        deny /var/run/secrets/kubernetes.io/serviceaccount/{,**} klmrw,
+	## == File/Dir END == ##
+	## == DISPATCHER START == ##
+					/bin/bash ix,
+					/bin/nc ix,
+					/usr/bin/bash ix,
+					/usr/bin/cat ix,
+					/usr/bin/env ix,
+					/usr/bin/mkfifo ix,
+					/usr/bin/nc ix,
+					/usr/bin/nc.openbsd ix,
+					/usr/bin/perl ix,
+					/usr/bin/rm ix,
+					/usr/bin/sleep ix,
+					/usr/games/cowsay ix,
+					/usr/games/fortune ix,
+					/usr/local/bin/wisecow.sh ix,
+	## == DISPATCHER END == ##
+  ## == Network START == ##
+      deny network raw,
+  ## == Network END == ##
+  ## == Capabilities START == ##
+  ## == Capabilities END == ##
+	## == Native Policy START == ##
+	## == Native Policy END == ##
+	## == POST START == ##
+	/lib/x86_64-linux-gnu/{*,**} rm,
+	deny @{PROC}/{*,**^[0-9*],sys/kernel/shm*} wkx,
+	deny @{PROC}/sysrq-trigger rwklx,
+	deny @{PROC}/mem rwklx,
+	deny @{PROC}/kmem rwklx,
+	deny @{PROC}/kcore rwklx,
+	deny mount,
+	deny /sys/[^f]*/** wklx,
+	deny /sys/f[^s]*/** wklx,
+	deny /sys/fs/[^c]*/** wklx,
+	deny /sys/fs/c[^g]*/** wklx,
+	deny /sys/fs/cg[^r]*/** wklx,
+	deny /sys/firmware/efi/efivars/** rwklx,
+	deny /sys/kernel/security/** rwklx,
+	## == POST END == ##
+}
+## == Dispatcher profile END == ##
+## == FromSource per binary profiles START == ##
+## == FromSource per binary profiles END == ##
+## == Templates section START == ##

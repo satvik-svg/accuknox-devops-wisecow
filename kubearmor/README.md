@@ -1,62 +1,68 @@
 # KubeArmor policies for wisecow
 
-Two policies, both selecting pods with `app: wisecow` in the `wisecow` namespace.
+Both policies select pods with `app: wisecow` in the `wisecow` namespace.
 
-**wisecow-process-allowlist.yaml** (action `Allow`)
-The pod may only run the programs `wisecow.sh` actually uses: bash, env, rm,
-mkfifo, cat, sleep, nc, fortune, cowsay and perl (cowsay is a perl script).
-With the namespace file posture set to `block` (KubeArmor treats starting a
-program as a file action, so this is the setting that covers processes), every other program is
-denied. So if someone gets a shell through the app, they cannot run `ls`,
-`curl`, `apt`, `python` and so on.
+**`wisecow-process-allowlist.yaml`** (action `Allow`)
+Only the programs `wisecow.sh` uses may run: bash, env, rm, mkfifo, cat,
+sleep, nc, fortune, cowsay and perl (cowsay is a perl script). File reads are
+allowed so the programs can load their libraries and data. With the namespace
+file posture set to `block`, any other program is denied. KubeArmor treats
+starting a program as a file action, which is why the file posture is the
+setting that covers processes.
 
-**wisecow-block-sensitive.yaml** (action `Block`)
-Extra rules that apply even to the allowed programs:
+**`wisecow-block-sensitive.yaml`** (action `Block`)
+Applies even to the allowed programs:
 - no reading `/etc/shadow` or `/etc/gshadow`
-- no writing anywhere under `/etc` or `/usr`
-- no reading the service account token directory
-- no raw sockets (stops tools like ping or packet crafting)
+- no writing under `/etc` or `/usr`
+- no access to the service account token directory
+- no raw sockets
 
 ## Apply
 
 ```bash
-# 1. Install KubeArmor (needs a node kernel with BPF-LSM or AppArmor)
-curl -sfL http://get.kubearmor.io/ | sudo sh -s -- -b /usr/local/bin   # installs the karmor CLI
+# KubeArmor needs a node kernel with BPF-LSM or AppArmor
+curl -sfL http://get.kubearmor.io/ | sudo sh -s -- -b /usr/local/bin
 karmor install
-karmor probe          # should show the enforcer as BPFLSM or AppArmor
+karmor probe
 
-# 2. Make anything not on the allowlist get blocked, not just logged
 kubectl annotate ns wisecow kubearmor-file-posture=block --overwrite
-
-# 3. Apply the policies and restart the pods so they pick them up
 kubectl apply -f kubearmor/
 kubectl -n wisecow rollout restart deploy/wisecow
 ```
 
-## See the violations (for the screenshot)
+## See the violations
 
-Terminal 1, stream alerts:
 ```bash
-karmor logs -n wisecow --logFilter=policy
-```
+karmor logs -n wisecow --logFilter=policy          # terminal 1
 
-Terminal 2, try things the policy should stop:
-```bash
 POD=$(kubectl -n wisecow get pod -l app=wisecow -o jsonpath='{.items[0].metadata.name}')
-kubectl -n wisecow exec $POD -- ls /                    # not on the allowlist, should say Permission denied
-kubectl -n wisecow exec $POD -- apt-get update          # blocked
-kubectl -n wisecow exec $POD -- cat /var/run/secrets/kubernetes.io/serviceaccount/token   # blocked
-kubectl -n wisecow exec $POD -- /usr/games/fortune      # allowed, still works
-curl -k https://<your-host>/                            # app still serves cows
+kubectl -n wisecow exec "$POD" -- bash -c 'ls /'                 # Permission denied
+kubectl -n wisecow exec "$POD" -- bash -c 'apt-get --version'    # Permission denied
+kubectl -n wisecow exec "$POD" -- bash -c '/usr/games/fortune'   # allowed
 ```
 
-Terminal 1 should print alerts with `"Action":"Block"` and the policy name.
-Take a screenshot showing the denied command and the matching alert side by
-side, and put it in `kubearmor/screenshots/`.
+`hack/kubearmor-proof.sh` does all of this and writes a report. The
+`KubeArmor policy proof` workflow runs it on a GitHub hosted VM.
 
-## Note
+## Saved proof
 
-Enforcement depends on the node. Managed clusters with Ubuntu or Bottlerocket
-nodes (EKS, GKE, AKS) usually work. Kind running inside another container
-may not let KubeArmor see container namespaces, in which case policies load
-but nothing is enforced.
+`proof/` holds the output of a real workflow run:
+
+| File | What it is |
+| --- | --- |
+| `kubearmor-blocks.png` | Image of the blocked commands, KubeArmor alerts and kernel denials, drawn from the saved logs |
+| `summary.md` | Full report: KubeArmor probe, before and after results, alert counts |
+| `exec-results.md` | Every command with its exit code and output |
+| `karmor-logs.json` | Raw alerts from `karmor logs --json` |
+| `apparmor-denials.log` | Kernel AppArmor denials for the wisecow profile |
+| `apparmor-profile.txt` | AppArmor profile KubeArmor generated from the policies |
+
+## Notes
+
+- Enforcement depends on the node. Ubuntu nodes with AppArmor, such as the
+  GitHub runners used here, work. Managed node images usually do too. kind nodes run inside
+  Docker, so policies load but nothing is enforced there. That is why the
+  proof uses k3s directly on the VM.
+- In the alert for `cat /etc/shadow`, KubeArmor lists the shared library
+  `cat` was loading as the resource. The `Source` field shows the real
+  command.

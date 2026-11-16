@@ -1,6 +1,8 @@
 # Zero trust for processes: wisecow may only start the programs it really needs.
 # Anything else (a shell spawned by an attacker, apt, curl, python...) is denied
-# once the namespace process posture is set to "block" (see README.md here).
+# once the namespace file posture is set to "block" (see README.md here).
+# KubeArmor treats running a program as a file action, so the file posture
+# is what decides what happens to programs that are not on this list.
 apiVersion: security.kubearmor.com/v1
 kind: KubeArmorPolicy
 metadata:

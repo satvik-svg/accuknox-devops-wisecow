@@ -64,12 +64,13 @@ run_tries "Before policies"
 check_app "before policies"
 
 echo "Applying policies"
-kubectl annotate ns "$NS" kubearmor-process-posture=block --overwrite
+kubectl annotate ns "$NS" kubearmor-file-posture=block --overwrite
 kubectl apply -f kubearmor/
 kubectl -n "$NS" rollout restart deploy/wisecow
 kubectl -n "$NS" rollout status deploy/wisecow --timeout=180s
 sleep 10
 kubectl get ksp -n "$NS" | tee "$OUT/policies.txt"
+karmor probe > "$OUT/probe-after.txt" 2>&1 || true
 kubectl -n "$NS" get pods -o yaml | grep -i -E 'apparmor|kubearmor' | sort -u | tee "$OUT/pod-annotations.txt"
 
 karmor logs -n "$NS" --json --logFilter=policy > "$OUT/karmor-logs.json" 2> "$OUT/karmor-logs.err" &
@@ -93,7 +94,7 @@ BLOCKS=$(grep -c '"Action":"Block"' "$OUT/karmor-logs.json" || true)
   echo "# KubeArmor proof"
   echo ""
   echo '```'
-  cat /tmp/probe.txt 2>/dev/null | head -40
+  sed -n '/Node 1/,$p' "$OUT/probe-after.txt" 2>/dev/null | head -40
   echo '```'
   echo ""
   cat "$OUT/exec-results.md"

@@ -5,7 +5,8 @@ Two policies, both selecting pods with `app: wisecow` in the `wisecow` namespace
 **wisecow-process-allowlist.yaml** (action `Allow`)
 The pod may only run the programs `wisecow.sh` actually uses: bash, env, rm,
 mkfifo, cat, sleep, nc, fortune, cowsay and perl (cowsay is a perl script).
-With the namespace process posture set to `block`, every other program is
+With the namespace file posture set to `block` (KubeArmor treats starting a
+program as a file action, so this is the setting that covers processes), every other program is
 denied. So if someone gets a shell through the app, they cannot run `ls`,
 `curl`, `apt`, `python` and so on.
 
@@ -25,7 +26,7 @@ karmor install
 karmor probe          # should show the enforcer as BPFLSM or AppArmor
 
 # 2. Make anything not on the allowlist get blocked, not just logged
-kubectl annotate ns wisecow kubearmor-process-posture=block --overwrite
+kubectl annotate ns wisecow kubearmor-file-posture=block --overwrite
 
 # 3. Apply the policies and restart the pods so they pick them up
 kubectl apply -f kubearmor/

@@ -46,11 +46,15 @@ kubectl -n wisecow exec "$POD" -- bash -c '/usr/games/fortune'   # allowed
 
 ## Saved proof
 
-`proof/` holds the output of a real workflow run:
+`proof/` holds the output of a real workflow run
+([run 43856148848](https://github.com/satvik-svg/accuknox-devops-wisecow/actions/runs/43856148848)),
+and `screenshots/` has screenshots of that same run on GitHub:
 
 | File | What it is |
 | --- | --- |
-| `kubearmor-blocks.png` | Image of the blocked commands, KubeArmor alerts and kernel denials, drawn from the saved logs |
+| `screenshots/00-run-summary.png` | The green run and the KubeArmor probe output |
+| `screenshots/01-blocked-commands.png` | Commands denied inside the pod after the policies |
+| `screenshots/02-karmor-block-logs.png` | KubeArmor alerts with action `Block` |
 | `summary.md` | Full report: KubeArmor probe, before and after results, alert counts |
 | `exec-results.md` | Every command with its exit code and output |
 | `karmor-logs.json` | Raw alerts from `karmor logs --json` |

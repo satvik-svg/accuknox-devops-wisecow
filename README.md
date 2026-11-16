@@ -214,10 +214,21 @@ the AppArmor enforcer there. The workflow runs the same commands in a wisecow
 pod before and after the policies, saves the KubeArmor alerts, and fails if
 nothing is blocked or if the app stops working.
 
-Reference run: https://github.com/satvik-svg/accuknox-devops-wisecow/actions/runs/43855329127
+Reference run: https://github.com/satvik-svg/accuknox-devops-wisecow/actions/runs/43856148848
 (saved output in [`kubearmor/proof/`](kubearmor/proof)).
 
-![KubeArmor blocking commands in the wisecow pod](kubearmor/proof/kubearmor-blocks.png)
+Screenshots of that run on GitHub are in
+[`kubearmor/screenshots/`](kubearmor/screenshots). The run passed, with the KubeArmor probe showing the policies attached to the wisecow pod:
+
+![Run summary with the KubeArmor probe](kubearmor/screenshots/00-run-summary.png)
+
+Commands that are not on the allowlist get `Permission denied` after the policies are applied:
+
+![Blocked commands in the wisecow pod](kubearmor/screenshots/01-blocked-commands.png)
+
+The KubeArmor alerts for those attempts, all with action `Block`:
+
+![KubeArmor block alerts](kubearmor/screenshots/02-karmor-block-logs.png)
 
 | Command run from bash in the pod | Before | After |
 | --- | --- | --- |
@@ -231,10 +242,10 @@ Reference run: https://github.com/satvik-svg/accuknox-devops-wisecow/actions/run
 KubeArmor alerts from `karmor logs -n wisecow --json`, trimmed:
 
 ```
-{"PodName":"wisecow-7d7755495b-pmz7s","PolicyName":"DefaultPosture","Operation":"Process","Resource":"/usr/bin/ls /","Action":"Block","Result":"Permission denied"}
-{"PodName":"wisecow-7d7755495b-pmz7s","PolicyName":"DefaultPosture","Operation":"Process","Resource":"/usr/bin/sh -c id","Action":"Block","Result":"Permission denied"}
-{"PodName":"wisecow-7d7755495b-pmz7s","PolicyName":"DefaultPosture","Operation":"Process","Resource":"/usr/bin/apt-get --version","Action":"Block","Result":"Permission denied"}
-{"PodName":"wisecow-7d7755495b-pmz7s","PolicyName":"wisecow-block-sensitive","Operation":"File","Source":"/usr/bin/cat /etc/shadow","Action":"Block","Result":"Permission denied"}
+{"PodName":"wisecow-77757f9448-62mj2","PolicyName":"DefaultPosture","Operation":"Process","Resource":"/usr/bin/ls /","Action":"Block","Result":"Permission denied"}
+{"PodName":"wisecow-77757f9448-62mj2","PolicyName":"DefaultPosture","Operation":"Process","Resource":"/usr/bin/sh -c id","Action":"Block","Result":"Permission denied"}
+{"PodName":"wisecow-77757f9448-62mj2","PolicyName":"DefaultPosture","Operation":"Process","Resource":"/usr/bin/apt-get --version","Action":"Block","Result":"Permission denied"}
+{"PodName":"wisecow-77757f9448-62mj2","PolicyName":"wisecow-block-sensitive","Operation":"File","Source":"/usr/bin/cat /etc/shadow","Action":"Block","Result":"Permission denied"}
 ```
 
 The kernel log confirms the denials came from the KubeArmor AppArmor profile:
